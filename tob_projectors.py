@@ -74,7 +74,7 @@ def node2voxel_weights(spc, L_hemi=None, R_hemi=None,
     return n2v_mat
 
 def voxel2nodes_weights(spc, L_hemi=None, R_hemi=None, 
-                        factor=10, cores=mp.cpu_count()):
+                        factor=10, edge_correct=True, cores=mp.cpu_count()):
     
     if (L_hemi is None) or (R_hemi is None): 
         if (L_hemi is not None): hemi = L_hemi 
@@ -99,19 +99,19 @@ def voxel2nodes_weights(spc, L_hemi=None, R_hemi=None,
     
     # Correction for edge effects. For voxels that are partially CSF, upscale
     # their signal by 1 / (GM+WM PV) - this encodes the assumption that CSF
-    # contributes no signal. Zero out the weight of voxels below a threshold 
-    brain_pv = pvs[:,:2].sum(1)
-    brain = (brain_pv > 1e-6)
-    upweight = np.zeros(brain_pv.shape, dtype=np.float32)
-    upweight[brain] = 1 / brain_pv[brain]
-    
-    # Each column corresponds to a voxel. Multiply the values in each by 
-    # their upweighting factor
-    v2s_mat.data *= np.take(upweight, v2s_mat.indices)
+    # contributes no signal. Zero out the weight of voxels below a threshold
+    if edge_correct: 
+        brain_pv = pvs[:,:2].sum(1)
+        brain = (brain_pv > 1e-6)
+        upweight = np.zeros(brain_pv.shape, dtype=np.float32)
+        upweight[brain] = 1 / brain_pv[brain]
+        
+        # Each column corresponds to a voxel. Multiply the values in each by 
+        # their upweighting factor
+        v2s_mat.data *= np.take(upweight, v2s_mat.indices)
     
     # Mapping of nodes that represent voxels is simply 1:1 
     v2v = sparse.eye(spc.size.prod(), dtype=np.float32)
-    
     v2n_mat = sparse.vstack((v2s_mat, v2v), format="csr")
     
     # Sanity checks here 
