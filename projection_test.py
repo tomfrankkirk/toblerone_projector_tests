@@ -9,16 +9,14 @@ from tob_projectors import node2voxel_weights, voxel2nodes_weights
 import pickle
 from scipy import sparse
 from scipy.sparse import linalg
-from subprocess import run 
-import tempfile
+from scipy.interpolate import interpn
 from wb_projection import * 
 from pdb import set_trace
 import copy 
-from scipy.interpolate import interpn
 
 INROOT = '/mnt/hgfs/Data/toblerone_evaluation_data/HCP_retest/test'
 OUTROOT = '/mnt/hgfs/Data/projection_test'
-N_SUBS = 25
+N_SUBS = 10
 SIDES = ['L', 'R']
 REF = op.join(OUTROOT, 'ref_2.2.nii.gz')
 loadnii = lambda f: nibabel.load(f).get_fdata().reshape(-1)
@@ -26,11 +24,11 @@ loadfunc = lambda f: nibabel.load(f).darrays[0].data
 FACTOR = 5
 EXPERIMENTS = ['naive', 'edge_corr', 'wm_cbf']
 TESTS = ['flat', 'sine', 'rand']
-REFRESH = True 
+REFRESH = False 
 
 def savefunc(data, fname):
     g = nibabel.GiftiImage()
-    g.add_gifti_data_array(nibabel.gifti.GiftiDataArray(data))
+    g.add_gifti_data_array(nibabel.gifti.GiftiDataArray(data.astype(np.float32)))
     nibabel.save(g, fname)
 
 def SUBIDS():
@@ -55,15 +53,17 @@ def hemi_paths(subid, side):
 
 def test_subject(data_dict, surf_dict, subid, exp, surf_paths, ref_path, factor):
 
-    subdir = op.join(OUTROOT, exp, subid)
-
     # Prepare objects for calls 
     spc = classes.ImageSpace(ref_path)
     ins, mids, outs = surf_paths
     savesurf = tob.Surface(mids)
     hemi = classes.Hemisphere(ins, outs, 'L')
-    hemi.PVs = pvs 
     hemi.apply_transform(spc.world2vox)
+
+    subdir = op.join(OUTROOT, exp, subid)
+    L_pvs_path = op.join(OUTROOT, 'naive', subid, 'tob_L_pvs.nii.gz')
+    pvs = nibabel.load(L_pvs_path).get_fdata().reshape(-1,3)
+    hemi.PVs = pvs 
 
     # Toblerone's projection matrices 
     edge_corr = (exp != 'naive')
@@ -115,13 +115,12 @@ def test_subject(data_dict, surf_dict, subid, exp, surf_paths, ref_path, factor)
 
         metric = surf_dict[key]
         metric_padded = metric 
+        vol = data_dict[key]
         if exp == 'wm_cbf':
-            vol = data_dict[key] + data_dict['wm_'+key]
+            vol += data_dict['wm_'+key]
             metric_padded = np.concatenate((metric, data_dict['wm_'+key]))
-        else: 
-            vol = data_dict[key]
-            if exp == 'edge_corr':
-                metric_padded = np.concatenate((metric, np.zeros_like(vol)))
+        if exp == 'edge_corr':
+            metric_padded = np.concatenate((metric, np.zeros_like(vol)))
 
         # Toblerone outputs vol - surf - vol 
         path = pathroot + '_v2s_tob.func.gii'
@@ -140,6 +139,17 @@ def test_subject(data_dict, surf_dict, subid, exp, surf_paths, ref_path, factor)
             v2s2v_tob_sp = linalg.lsqr(v2s_tob_mat, v2s_tob)[0]
             spc.save_image(v2s2v_tob_sp, pathroot + '_v2s2v_tob_sp.nii.gz')
 
+        # path = pathroot + '_v2s_tob_sp.func.gii'
+        # if not op.exists(path) or REFRESH:
+        #     v2s_tob_sp = linalg.lsqr(s2v_tob_mat, vol)[0]
+        #     savefunc(v2s_tob_sp, path)
+        # v2s_tob_sp = loadfunc(path)
+
+        # path = pathroot + '_v2s2v_tob_sp_sp.nii.gz'
+        # if not op.exists(path) or REFRESH:
+        #     v2s2v_tob_sp_sp = linalg.lsqr(v2s_tob_mat, v2s_tob_sp)[0]
+        #     spc.save_image(v2s2v_tob_sp_sp, path)
+
         # WB command outputs vol - surf - vol 
         path = pathroot + '_v2s_wb.func.gii'
         if not op.exists(path) or REFRESH:
@@ -157,6 +167,17 @@ def test_subject(data_dict, surf_dict, subid, exp, surf_paths, ref_path, factor)
             v2s2v_wb_sp = linalg.lsqr(v2s_wb_mat, v2s_wb)[0]
             spc.save_image(v2s2v_wb_sp, path)
 
+        # path = pathroot + '_v2s_wb_sp.func.gii'
+        # if not op.exists(path) or REFRESH:
+        #     v2s_wb_sp = linalg.lsqr(s2v_wb_mat, vol)[0]
+        #     savefunc(v2s_wb_sp, path)
+        # v2s_wb_sp = loadfunc(path)
+
+        # path = pathroot + '_v2s2v_wb_sp_sp.nii.gz'
+        # if not op.exists(path) or REFRESH:
+        #     v2s2v_wb_sp_sp = linalg.lsqr(v2s_wb_mat, v2s_wb_sp)[0]
+        #     spc.save_image(v2s2v_wb_sp_sp, path)
+
         # Toblerone outputs surf - vol - surf 
         path = pathroot + '_s2v_tob.nii.gz'
         if not op.exists(path) or REFRESH:
@@ -164,15 +185,26 @@ def test_subject(data_dict, surf_dict, subid, exp, surf_paths, ref_path, factor)
             spc.save_image(s2v_tob, path)
         s2v_tob = loadnii(path)
 
-        path = pathroot + '_s2v2s_tob'
+        path = pathroot + '_s2v2s_tob.func.gii'
         if not op.exists(path) or REFRESH:
             s2v2s_tob = v2s_tob_mat.dot(s2v_tob)
             savefunc(s2v2s_tob, path)
 
-        path = pathroot + '_s2v2s_tob_sp'
+        path = pathroot + '_s2v2s_tob_sp.func.gii'
         if not op.exists(path) or REFRESH:
             s2v2s_tob_sp = linalg.lsqr(s2v_tob_mat, s2v_tob)[0]
             savefunc(s2v2s_tob_sp, path)
+
+        # path = pathroot + '_s2v_tob_sp.func.gii'
+        # if not op.exists(path) or REFRESH:
+        #     s2v_tob_sp = linalg.lsqr(v2s_tob_mat, metric_padded)[0]
+        #     savefunc(s2v_tob_sp, path)
+        # s2v_tob_sp = loadfunc(path)
+
+        # path = pathroot + '_s2v2s_tob_sp_sp.nii.gz'
+        # if not op.exists(path) or REFRESH:
+        #     s2v2s_tob_sp_sp = linalg.lsqr(v2s_tob_mat, s2v_tob_sp)[0]
+        #     spc.save_image(s2v2s_tob_sp_sp, path)
 
         # WB_commnd outputs surf - vol - surf 
         path = pathroot + '_s2v_wb.nii.gz'
@@ -181,15 +213,26 @@ def test_subject(data_dict, surf_dict, subid, exp, surf_paths, ref_path, factor)
             spc.save_image(s2v_wb, path)
         s2v_wb = loadnii(path)
 
-        path = pathroot + '_s2v2s_wb'
+        path = pathroot + '_s2v2s_wb.func.gii'
         if not op.exists(path) or REFRESH:
             s2v2s_wb = v2s_wb_mat.dot(s2v_wb)
             savefunc(s2v2s_wb, path)
 
-        path = pathroot + '_s2v2s_wb_sp'
+        path = pathroot + '_s2v2s_wb_sp.func.gii'
         if not op.exists(path) or REFRESH:
             s2v2s_wb_sp = linalg.lsqr(s2v_wb_mat, s2v_wb)[0]
             savefunc(s2v2s_wb_sp, path)
+
+        # path = pathroot + '_s2v_wb_sp.func.gii'
+        # if not op.exists(path) or REFRESH:
+        #     s2v_wb_sp = linalg.lsqr(v2s_wb_mat, metric)[0]
+        #     savefunc(s2v_wb_sp, path)
+        # s2v_wb_sp = loadfunc(path)
+
+        # path = pathroot + '_s2v2s_wb_sp_sp.nii.gz'
+        # if not op.exists(path) or REFRESH:
+        #     s2v2s_wb_sp_sp = linalg.lsqr(v2s_wb_mat, s2v_wb_sp)[0]
+        #     spc.save_image(s2v2s_wb_sp_sp, path)
 
 
 def make_surf_truths(spc, surf):
@@ -260,19 +303,37 @@ if __name__ == "__main__":
             midsurf = tob.Surface(L_surfs[1])
             vol_truths = make_volume_truths(pvs, ref_spc)
             surf_truths = make_surf_truths(ref_spc, midsurf)
+
+            path = op.join(outdir, 'smask.func.gii')
+            if not op.exists(path):
+                insurf = classes.Surface(L_surfs[0])
+                outsurf = classes.Surface(L_surfs[2])
+                thickness = np.linalg.norm(outsurf.points - insurf.points, ord=2, axis=1)
+                smask = (thickness > 0.5)
+                savefunc(smask, path)
+
             for key in TESTS:
                 vol = vol_truths[key]
                 path = op.join(outdir, '%s.nii.gz' % key)
                 if not op.exists(path) or REFRESH:
                     ref_spc.save_image(vol, path)
-                vol_truths[key] = loadnii(path)
+                    if exp == 'wm_cbf':
+                        ref_spc.save_image(vol_truths['wm_'+key], op.join(outdir, 'wm_'+key+'.nii.gz'))
+                else:
+                    vol_truths[key] = loadnii(path)
+                    if exp != 'wm_cbf': 
+                        vol_truths.pop('wm_'+key)
+                    else: 
+                        vol_truths['wm_'+key] = loadnii(op.join(outdir, 'wm_'+key+'.nii.gz'))
+
                 path = op.join(outdir, key+'.func.gii')
-                if not op.exists(path):
+                if not op.exists(path) or REFRESH:
                     midsurf.save_metric(surf_truths[key], path)
                 surf_truths[key] = loadfunc(path)    
 
             # Run the test suite
             try: 
+                # pass
                 test_subject(vol_truths, surf_truths, subid, exp, L_surfs, REF, FACTOR)
             except Exception as e: 
                 print(e)

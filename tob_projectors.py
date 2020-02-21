@@ -2,6 +2,7 @@ import numpy as np
 from scipy import sparse
 import multiprocessing as mp 
 from toblerone import projection
+from pdb import set_trace
 
 # FIXME:add a warning if the surfaces are not enclosed in the FoV?
 
@@ -34,7 +35,7 @@ def node2voxel_weights(spc, L_hemi=None, R_hemi=None,
     else: 
 
         # Combine PV estimates from each hemisphere into single map 
-        pvs = np.zeros((spc.size.prod(), 3), dtype=np.float32)
+        pvs = np.zeros((spc.size.prod(), 3))
         pvs[:,0] = np.minimum(1.0, L_hemi.PVs[:,0] + R_hemi.PVs[:,0])
         pvs[:,1] = np.minimum(1.0 - pvs[:,0], L_hemi.PVs[:,1] + R_hemi.PVs[:,1])
         pvs[:,2] = 1.0 - np.sum(pvs[:,0:2], axis=1)
@@ -62,7 +63,7 @@ def node2voxel_weights(spc, L_hemi=None, R_hemi=None,
     # BUT their weights are rescaled by their WM fractions. This ensures that voxels
     # that contain both WM and GM have total weights that sum to unity 
     v2v = sparse.dia_matrix((pvs[:,1], 0), 
-                shape=(spc.size.prod(), spc.size.prod()), dtype=np.float32)
+                shape=(spc.size.prod(), spc.size.prod()))
     
     # Stack into a matrix sized (voxels x nodes)
     n2v_mat = sparse.hstack((s2v_mat, v2v), format="csr")
@@ -70,6 +71,10 @@ def node2voxel_weights(spc, L_hemi=None, R_hemi=None,
     # Do some sanity checks here. Per-vox sum should equal the brain PV 
 #     vox_weights = n2v_mat.sum(1).A.flatten()
 #     assert (np.abs(vox_weights[vox_weights > 0] - 1) < 1e-6).all()
+
+    # if (n2v_mat.data == 0).any(): 
+    #     set_trace()
+    #     raise RuntimeError("zero weighting in matrix") 
         
     return n2v_mat
 
@@ -102,8 +107,8 @@ def voxel2nodes_weights(spc, L_hemi=None, R_hemi=None,
     # contributes no signal. Zero out the weight of voxels below a threshold
     if edge_correct: 
         brain_pv = pvs[:,:2].sum(1)
-        brain = (brain_pv > 1e-6)
-        upweight = np.zeros(brain_pv.shape, dtype=np.float32)
+        brain = (brain_pv > 1e-3)
+        upweight = np.zeros(brain_pv.shape)
         upweight[brain] = 1 / brain_pv[brain]
         
         # Each column corresponds to a voxel. Multiply the values in each by 
@@ -111,10 +116,14 @@ def voxel2nodes_weights(spc, L_hemi=None, R_hemi=None,
         v2s_mat.data *= np.take(upweight, v2s_mat.indices)
     
     # Mapping of nodes that represent voxels is simply 1:1 
-    v2v = sparse.eye(spc.size.prod(), dtype=np.float32)
+    v2v = sparse.eye(spc.size.prod())
     v2n_mat = sparse.vstack((v2s_mat, v2v), format="csr")
     
     # Sanity checks here 
+    # if (v2n_mat.data == 0).any(): 
+    #     set_trace()
+    #     raise RuntimeError("zero weighting in matrix")
+
     return v2n_mat
 
 
