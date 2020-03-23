@@ -2,9 +2,10 @@ import numpy as np
 from scipy import sparse
 import tempfile
 from subprocess import run 
-import toblerone as tob 
+from toblerone.projection import sparse_normalise 
 import os.path as op 
 import nibabel
+
 
 loadnii = lambda f: nibabel.load(f).get_fdata().reshape(-1)
 loadfunc = lambda f: nibabel.load(f).darrays[0].data
@@ -45,21 +46,11 @@ def wb_v2n_method(vdata, insurf, midsurf, outsurf, spc, factor):
 
     return weights, func 
 
-# def wb_n2v_method(sdata, insurf, midsurf, outsurf, ref, factor):
-    
-#     with tempfile.TemporaryDirectory() as d: 
-#         f = op.join(d, 'temp.nii.gz')   
-#         gii = op.join(d, 's.func.gii')
-#         g = nibabel.gifti.GiftiImage()
-#         da = nibabel.gifti.GiftiDataArray(sdata.astype(np.float32))
-#         g.add_gifti_data_array(da)
-#         nibabel.save(g, gii)
-        
-#         cmd = ("wb_command -metric-to-volume-mapping %s " % gii 
-#         + "%s %s %s " % (midsurf, ref, f)
-#         + "-ribbon-constrained %s %s -voxel-subdiv %d" % (insurf, outsurf, factor))
-#         run(cmd, shell=True)
-#         data = loadnii(f)
-        
-#     return data 
-    
+def wb_n2v_method(wb_mat):
+
+    gm_pv = wb_mat.sum(0).A.flatten()
+    gm_pv = gm_pv / gm_pv.max()
+    n2v_wb_mat = sparse_normalise(wb_mat, 0)
+    n2v_wb_mat.data *= np.take(gm_pv, n2v_wb_mat.indices)
+    n2v_wb_mat = n2v_wb_mat.T
+    return n2v_wb_mat 
