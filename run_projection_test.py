@@ -136,7 +136,7 @@ def test_subject(data_dict, surf_dict, subid, exp, surf_paths):
     # Load wb_command projection that we prepared earlier 
     wb_mat_path = op.join(OUTROOT, 'projectors', '%s_wb_mat.npz' % subid)
     wb_mat = sparse.load_npz(wb_mat_path)
-    v2n_wb_mat = projection.sparse_normalise(wb_mat, 1)
+    v2n_wb_mat = utils.sparse_normalise(wb_mat, 1)
     n2v_wb_mat = wb_projection.wb_n2v_method(wb_mat)
     
     # Local signal test (peak activation). This projection is performed using
